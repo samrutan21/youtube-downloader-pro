@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>YouTube Downloader Pro</title>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+    <div class="app-container">
+        <!-- Header -->
+        <header class="app-header">
+            <div class="header-content">
+                <div class="logo">
+                    <i class="fab fa-youtube"></i>
+                    <h1>YouTube Downloader Pro</h1>
+                </div>
+                <div class="header-actions">
+                    <button class="btn-secondary" id="settingsBtn">
+                        <i class="fas fa-cog"></i>
+                        Settings
+                    </button>
+                </div>
+            </div>
+        </header>
+
+        <!-- Main Content -->
+        <main class="main-content">
+            <div class="content-container">
+                <!-- URL Input Section -->
+                <section class="input-section">
+                    <div class="section-header">
+                        <h2><i class="fas fa-link"></i> Enter Video URL</h2>
+                        <p>Paste any YouTube video URL to get started</p>
+                    </div>
+                    
+                    <div class="url-input-container">
+                        <div class="input-group">
+                            <input type="url" id="videoUrl" placeholder="https://www.youtube.com/watch?v=..." class="url-input">
+                            <button class="btn-primary analyze-btn" id="analyzeBtn">
+                                <i class="fas fa-search"></i>
+                                Analyze Video
+                            </button>
+                        </div>
+                        <div class="url-examples">
+                            <span>Examples:</span>
+                            <code>https://www.youtube.com/watch?v=dQw4w9WgXcQ</code>
+                            <code>https://youtu.be/dQw4w9WgXcQ</code>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- Video Info Section -->
+                <section class="video-info-section" id="videoInfoSection" style="display: none;">
+                    <div class="section-header">
+                        <h2><i class="fas fa-video"></i> Video Information</h2>
+                    </div>
+                    
+                    <div class="video-card">
+                        <div class="video-thumbnail">
+                            <img id="videoThumbnail" src="" alt="Video thumbnail">
+                            <div class="video-duration" id="videoDuration"></div>
+                        </div>
+                        <div class="video-details">
+                            <h3 id="videoTitle"></h3>
+                            <div class="video-meta">
+                                <span class="meta-item">
+                                    <i class="fas fa-user"></i>
+                                    <span id="videoUploader"></span>
+                                </span>
+                                <span class="meta-item">
+                                    <i class="fas fa-eye"></i>
+                                    <span id="videoViews"></span>
+                                </span>
+                                <span class="meta-item">
+                                    <i class="fas fa-thumbs-up"></i>
+                                    <span id="videoLikes"></span>
+                                </span>
+                            </div>
+                            <p class="video-description" id="videoDescription"></p>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- Quality Selection Section -->
+                <section class="quality-section" id="qualitySection" style="display: none;">
+                    <div class="section-header">
+                        <h2><i class="fas fa-hd-video"></i> Select Quality</h2>
+                        <p>Choose your preferred video quality and format</p>
+                    </div>
+                    
+                    <div class="quality-grid" id="qualityGrid">
+                        <!-- Quality options will be populated here -->
+                    </div>
+                </section>
+
+                <!-- Download Settings Section -->
+                <section class="download-settings-section" id="downloadSettingsSection" style="display: none;">
+                    <div class="section-header">
+                        <h2><i class="fas fa-download"></i> Download Settings</h2>
+                    </div>
+                    
+                    <div class="settings-grid">
+                        <div class="setting-item">
+                            <label for="downloadPath">
+                                <i class="fas fa-folder"></i>
+                                Download Location
+                            </label>
+                            <div class="path-input-group">
+                                <input type="text" id="downloadPath" class="path-input" readonly>
+                                <button class="btn-secondary" id="browseBtn">
+                                    <i class="fas fa-folder-open"></i>
+                                    Browse
+                                </button>
+                            </div>
+                        </div>
+                        
+                        <div class="setting-item">
+                            <label for="filenameTemplate">
+                                <i class="fas fa-file"></i>
+                                Filename Template
+                            </label>
+                            <select id="filenameTemplate" class="template-select">
+                                <option value="title">Video Title</option>
+                                <option value="title-date">Title + Date</option>
+                                <option value="title-quality">Title + Quality</option>
+                                <option value="custom">Custom</option>
+                            </select>
+                        </div>
+                    </div>
+                    
+                    <div class="download-actions">
+                        <button class="btn-primary btn-large download-btn" id="downloadBtn" disabled>
+                            <i class="fas fa-download"></i>
+                            Start Download
+                        </button>
+                    </div>
+                </section>
+
+                <!-- Progress Section -->
+                <section class="progress-section" id="progressSection" style="display: none;">
+                    <div class="section-header">
+                        <h2><i class="fas fa-tasks"></i> Download Progress</h2>
+                    </div>
+                    
+                    <div class="progress-card">
+                        <div class="progress-info">
+                            <div class="progress-stats">
+                                <span class="stat-item">
+                                    <i class="fas fa-percentage"></i>
+                                    <span id="progressPercent">0%</span>
+                                </span>
+                                <span class="stat-item">
+                                    <i class="fas fa-tachometer-alt"></i>
+                                    <span id="downloadSpeed">0 MB/s</span>
+                                </span>
+                                <span class="stat-item">
+                                    <i class="fas fa-clock"></i>
+                                    <span id="timeRemaining">Calculating...</span>
+                                </span>
+                            </div>
+                            
+                            <div class="progress-bar-container">
+                                <div class="progress-bar">
+                                    <div class="progress-fill" id="progressFill"></div>
+                                </div>
+                            </div>
+                            
+                            <div class="progress-status" id="progressStatus">
+                                Preparing download...
+                            </div>
+                        </div>
+                        
+                        <div class="progress-actions">
+                            <button class="btn-secondary" id="pauseBtn">
+                                <i class="fas fa-pause"></i>
+                                Pause
+                            </button>
+                            <button class="btn-danger" id="cancelBtn">
+                                <i class="fas fa-times"></i>
+                                Cancel
+                            </button>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- Downloads History -->
+                <section class="downloads-section">
+                    <div class="section-header">
+                        <h2><i class="fas fa-history"></i> Download History</h2>
+                        <button class="btn-secondary btn-small" id="clearHistoryBtn">
+                            <i class="fas fa-trash"></i>
+                            Clear History
+                        </button>
+                    </div>
+                    
+                    <div class="downloads-list" id="downloadsList">
+                        <div class="empty-state">
+                            <i class="fas fa-download"></i>
+                            <p>No downloads yet</p>
+                        </div>
+                    </div>
+                </section>
+            </div>
+        </main>
+
+        <!-- Footer -->
+        <footer class="app-footer">
+            <div class="footer-content">
+                <p>&copy; 2024 YouTube Downloader Pro. Built with ❤️ for content creators.</p>
+                <div class="footer-links">
+                    <a href="#" class="footer-link">Privacy Policy</a>
+                    <a href="#" class="footer-link">Terms of Service</a>
+                    <a href="#" class="footer-link">Support</a>
+                </div>
+            </div>
+        </footer>
+    </div>
+
+    <!-- Loading Overlay -->
+    <div class="loading-overlay" id="loadingOverlay">
+        <div class="loading-spinner">
+            <div class="spinner"></div>
+            <p id="loadingText">Analyzing video...</p>
+        </div>
+    </div>
+
+    <!-- Toast Notifications -->
+    <div class="toast-container" id="toastContainer"></div>
+
+    <!-- Scripts -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.2/socket.io.js"></script>
+    <script src="{{ url_for('static', filename='js/app.js') }}"></script>
+</body>
+</html>
