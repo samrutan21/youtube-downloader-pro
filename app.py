@@ -115,6 +115,17 @@ class YouTubeDownloader:
             )
             
             formats = []
+            # Add MP3 option at the beginning
+            formats.append({
+                'format_id': 'audio_mp3',
+                'resolution': 'Audio Only',
+                'quality': 'MP3',
+                'fps': 0,
+                'has_audio': True,
+                'size': 'Unknown',
+                'ext': 'mp3'
+            })
+            
             for resolution, format_list in sorted_resolutions:
                 best_format = max(format_list, key=lambda x: (x['has_audio'], x['fps']))
                 
@@ -224,17 +235,34 @@ class YouTubeDownloader:
                         'status': 'finished'
                     })
             
-            ydl_opts = {
-                'format': f'{format_id}+bestaudio/best',
-                'outtmpl': os.path.join(output_path, '%(title)s.%(ext)s'),
-                'merge_output_format': 'mp4',
-                'progress_hooks': [progress_hook],
-                'continuedl': True,
-                'noplaylist': True,
-                'keepvideo': False,
-                'nocheckcertificate': True,
-                'ignoreerrors': True
-            }
+            # Check if audio download is requested
+            if format_id == 'audio_mp3':
+                ydl_opts = {
+                    'format': 'bestaudio/best',
+                    'outtmpl': os.path.join(output_path, '%(title)s.%(ext)s'),
+                    'postprocessors': [{
+                        'key': 'FFmpegExtractAudio',
+                        'preferredcodec': 'mp3',
+                        'preferredquality': '192',
+                    }],
+                    'progress_hooks': [progress_hook],
+                    'continuedl': True,
+                    'noplaylist': True,
+                    'nocheckcertificate': True,
+                    'ignoreerrors': True
+                }
+            else:
+                ydl_opts = {
+                    'format': f'{format_id}+bestaudio/best',
+                    'outtmpl': os.path.join(output_path, '%(title)s.%(ext)s'),
+                    'merge_output_format': 'mp4',
+                    'progress_hooks': [progress_hook],
+                    'continuedl': True,
+                    'noplaylist': True,
+                    'keepvideo': False,
+                    'nocheckcertificate': True,
+                    'ignoreerrors': True
+                }
             
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 ydl.download([url])
@@ -248,9 +276,12 @@ class YouTubeDownloader:
             
         except Exception as e:
             self.downloads[download_id]['status'] = 'error'
+            error_msg = str(e)
+            if format_id == 'audio_mp3' and ('ffmpeg' in error_msg.lower() or 'FFmpeg' in error_msg):
+                error_msg = f"{error_msg}\n\nNote: MP3 conversion requires FFmpeg to be installed."
             socketio.emit('download_error', {
                 'download_id': download_id,
-                'error': str(e)
+                'error': error_msg
             })
 
 # Initialize downloader

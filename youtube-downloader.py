@@ -106,6 +106,11 @@ def display_formats(video_info, resolution_formats):
     resolution_map = {}
     choice_num = 1
     
+    # Add MP3 option at the beginning
+    print(f"[{choice_num}] Audio Only (MP3)")
+    resolution_map[str(choice_num)] = ('audio', 'mp3')
+    choice_num += 1
+    
     for resolution, formats in sorted_resolutions:
         # Get best format for this resolution (prefer formats with audio)
         best_format = max(formats, key=lambda x: (x['has_audio'], x['fps']))
@@ -209,6 +214,68 @@ def download_video(url, format_id, output_path="downloads"):
         sys.exit(1)
 
 
+def download_audio(url, output_path="downloads"):
+    """
+    Download audio from a YouTube video as MP3
+    
+    Args:
+        url: YouTube video URL
+        output_path: Directory to save the audio (default: 'downloads')
+    """
+    
+    # Create output directory if it doesn't exist
+    os.makedirs(output_path, exist_ok=True)
+    
+    # Configure yt-dlp options for audio extraction
+    ydl_opts = {
+        # Format selection: best audio available
+        'format': 'bestaudio/best',
+        
+        # Output template
+        'outtmpl': os.path.join(output_path, '%(title)s.%(ext)s'),
+        
+        # Post-processor to extract and convert to MP3
+        'postprocessors': [{
+            'key': 'FFmpegExtractAudio',
+            'preferredcodec': 'mp3',
+            'preferredquality': '192',
+        }],
+        
+        # Show progress
+        'progress_hooks': [progress_hook],
+        
+        # Continue partial downloads
+        'continuedl': True,
+        
+        # No playlist, just single video
+        'noplaylist': True,
+        
+        # SSL certificate bypass
+        'nocheckcertificate': True,
+        'ignoreerrors': True
+    }
+    
+    try:
+        print("\n" + "=" * 70)
+        print("Starting audio download (MP3)...")
+        print("=" * 70)
+        
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            ydl.download([url])
+            
+        print("\n" + "=" * 70)
+        print("✓ Audio download completed successfully!")
+        print(f"✓ Saved to: {output_path}/")
+        print("=" * 70)
+        
+    except Exception as e:
+        print(f"\n✗ ERROR: Audio download failed!")
+        print(f"Error details: {str(e)}")
+        print("\nNote: MP3 conversion requires FFmpeg to be installed.")
+        print("Please install FFmpeg and try again.")
+        sys.exit(1)
+
+
 def progress_hook(d):
     """Display download progress"""
     if d['status'] == 'downloading':
@@ -272,28 +339,35 @@ def main():
         if auto_mode and len(sys.argv) > 3:
             choice = sys.argv[3]
         else:
-            print("\nOptions:")
-            print("  - Enter a number to select resolution")
-            print("  - Enter 'best' for highest quality")
-            print("  - Enter 'q' to quit")
-            choice = input("\nYour choice: ").strip().lower()
+        print("\nOptions:")
+        print("  - Enter a number to select resolution")
+        print("  - Enter 'best' for highest quality")
+        print("  - Enter 'q' to quit")
+        choice = input("\nYour choice: ").strip().lower()
         
         if choice == 'q':
             print("Cancelled.")
             sys.exit(0)
         elif choice == 'best':
-            # Get highest resolution
-            resolution, format_id = list(resolution_map.values())[0]
+            # Get highest resolution (skip audio option which is at index 0)
+            if len(resolution_map) > 1:
+                # Get the second item (first video resolution)
+                resolution, format_id = list(resolution_map.values())[1]
+            else:
+                # Fallback if only audio option exists
+                resolution, format_id = list(resolution_map.values())[0]
             print(f"\n✓ Selected: {resolution} (Best Quality)")
+            download_video(url, format_id, output_path)
         elif choice in resolution_map:
             resolution, format_id = resolution_map[choice]
             print(f"\n✓ Selected: {resolution}")
+            if resolution == 'audio':
+                download_audio(url, output_path)
+            else:
+                download_video(url, format_id, output_path)
         else:
             print(f"✗ Invalid choice: {choice}")
             sys.exit(1)
-        
-        # Download the video
-        download_video(url, format_id, output_path)
         
     except KeyboardInterrupt:
         print("\n\n⚠ Download cancelled by user.")

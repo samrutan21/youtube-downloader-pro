@@ -52,7 +52,7 @@ except ImportError:
 
 try:
     import tkinter as tk
-    from tkinter import ttk, filedialog, messagebox
+    from tkinter import ttk, filedialog, messagebox, simpledialog
 except ImportError:
     print("ERROR: tkinter is not installed!")
     sys.exit(1)
@@ -74,6 +74,8 @@ class YouTubeDownloaderGUI:
         self.resolution_formats = None
         self.selected_format = None
         self.is_downloading = False
+        self.partial_downloads = []  # Store detected partial downloads
+        self.selected_partial = None  # Selected partial download to resume
         
         # Modern color scheme
         self.bg_primary = "#0f0f0f"
@@ -89,6 +91,9 @@ class YouTubeDownloaderGUI:
         
         self.setup_ui()
         self.apply_theme()
+        
+        # Auto-check for partial downloads on startup
+        self.root.after(100, self.check_partial_downloads)
         
     def setup_ui(self):
         """Set up the modern user interface"""
@@ -311,6 +316,84 @@ class YouTubeDownloaderGUI:
         )
         browse_btn.pack(side=tk.RIGHT, padx=(10, 15), pady=10)
         
+        # Resume Partial Downloads Section
+        self.resume_section = tk.Frame(location_section, bg=self.bg_secondary)
+        
+        resume_header = tk.Frame(self.resume_section, bg=self.bg_secondary)
+        resume_header.pack(fill=tk.X, padx=20, pady=(0, 10))
+        
+        resume_title = tk.Label(
+            resume_header,
+            text="Resume Partial Downloads",
+            font=("SF Pro Text", 11, "bold"),
+            bg=self.bg_secondary,
+            fg=self.text_primary
+        )
+        resume_title.pack(side=tk.LEFT)
+        
+        self.check_resume_btn = tk.Button(
+            resume_header,
+            text="Check for Partial Downloads",
+            font=("SF Pro Text", 9),
+            bg=self.bg_tertiary,
+            fg=self.text_primary,
+            activebackground=self.bg_tertiary,
+            activeforeground=self.text_primary,
+            relief=tk.FLAT,
+            cursor="hand2",
+            command=self.check_partial_downloads,
+            bd=0,
+            highlightthickness=0
+        )
+        self.check_resume_btn.pack(side=tk.RIGHT)
+        
+        self.resume_listbox_frame = tk.Frame(self.resume_section, bg=self.bg_tertiary)
+        
+        scrollbar_resume = tk.Scrollbar(self.resume_listbox_frame)
+        scrollbar_resume.pack(side=tk.RIGHT, fill=tk.Y)
+        
+        self.resume_listbox = tk.Listbox(
+            self.resume_listbox_frame,
+            font=("SF Pro Text", 9),
+            bg=self.bg_tertiary,
+            fg=self.text_primary,
+            selectbackground=self.accent_blue,
+            selectforeground=self.text_primary,
+            relief=tk.FLAT,
+            bd=0,
+            highlightthickness=0,
+            yscrollcommand=scrollbar_resume.set,
+            activestyle='none',
+            height=3
+        )
+        self.resume_listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=10, pady=10)
+        scrollbar_resume.config(command=self.resume_listbox.yview)
+        
+        self.resume_listbox.bind('<<ListboxSelect>>', self.on_resume_select)
+        
+        # Pack the listbox frame into resume section
+        self.resume_listbox_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=(0, 10))
+        
+        resume_btn_frame = tk.Frame(self.resume_section, bg=self.bg_secondary)
+        resume_btn_frame.pack(fill=tk.X, padx=20, pady=(0, 10))
+        
+        self.resume_btn = tk.Button(
+            resume_btn_frame,
+            text="Resume Selected Download",
+            font=("SF Pro Text", 10, "bold"),
+            bg=self.accent_blue,
+            fg=self.text_primary,
+            activebackground="#005a9e",
+            activeforeground=self.text_primary,
+            relief=tk.FLAT,
+            cursor="hand2",
+            command=self.resume_download,
+            state=tk.DISABLED,
+            bd=0,
+            highlightthickness=0
+        )
+        self.resume_btn.pack(fill=tk.X)
+        
         # Download Button
         self.download_btn = tk.Button(
             location_section,
@@ -513,6 +596,9 @@ class YouTubeDownloaderGUI:
         # Populate quality listbox
         self.quality_listbox.delete(0, tk.END)
         
+        # Add MP3 option at the beginning
+        self.quality_listbox.insert(tk.END, "🎵 Audio Only (MP3)")
+        
         # Sort resolutions by height
         sorted_resolutions = sorted(
             self.resolution_formats.items(),
@@ -564,13 +650,22 @@ class YouTubeDownloaderGUI:
             return
         
         idx = selection[0]
+        
+        # Check if MP3 option is selected (index 0)
+        if idx == 0:
+            self.selected_format = 'audio_mp3'
+            self.download_btn.config(state=tk.NORMAL)
+            self.status_var.set("Ready to download as MP3")
+            return
+        
+        # Adjust index for video resolutions (subtract 1 for MP3 option)
         sorted_resolutions = sorted(
             self.resolution_formats.items(),
             key=lambda x: int(x[0].split('x')[1]),
             reverse=True
         )
         
-        resolution, formats = sorted_resolutions[idx]
+        resolution, formats = sorted_resolutions[idx - 1]
         best_format = max(formats, key=lambda x: (x['has_audio'], x['fps']))
         
         self.selected_format = best_format['format_id']
@@ -585,6 +680,193 @@ class YouTubeDownloaderGUI:
         directory = filedialog.askdirectory(initialdir=self.output_var.get())
         if directory:
             self.output_var.set(directory)
+            # Auto-check for partial downloads when directory changes
+            self.check_partial_downloads()
+    
+    def check_partial_downloads(self):
+        """Scan download directory for .part files"""
+        print("DEBUG: check_partial_downloads called")  # Debug output
+        self.partial_downloads = []
+        self.resume_listbox.delete(0, tk.END)
+        
+        # Always show the resume section when checking
+        self.resume_section.pack(fill=tk.X, padx=20, pady=(10, 20))
+        
+        try:
+            download_path = Path(self.output_var.get())
+            print(f"DEBUG: Checking directory: {download_path}")  # Debug output
+            
+            if not download_path.exists():
+                # Show section with error message
+                self.resume_listbox.insert(0, f"Error: Directory does not exist: {download_path}")
+                self.resume_section.pack(fill=tk.X, padx=20, pady=(10, 20))
+                self.status_var.set("Directory not found")
+                return
+            
+            # Find all .part files (case-insensitive search)
+            part_files = list(download_path.glob("*.part"))
+            part_files.extend(list(download_path.glob("*.PART")))  # Also check uppercase
+            print(f"DEBUG: Found {len(part_files)} .part files")  # Debug output
+            
+            if not part_files:
+                self.resume_listbox.insert(0, "No partial downloads found in this directory.")
+                self.resume_section.pack(fill=tk.X, padx=20, pady=(10, 20))
+                self.status_var.set("No partial downloads found")
+                return
+            
+            found_count = 0
+            for part_file in part_files:
+                # Skip fragment files
+                if "-Frag" in part_file.name or "-frag" in part_file.name:
+                    continue
+                
+                found_count += 1
+                
+                # Get file size
+                try:
+                    size_bytes = part_file.stat().st_size
+                    if size_bytes > 1_000_000_000:
+                        size_str = f"{size_bytes / 1_000_000_000:.2f} GB"
+                    else:
+                        size_str = f"{size_bytes / 1_000_000:.2f} MB"
+                except Exception as e:
+                    size_str = "Unknown"
+                    size_bytes = 0
+                
+                # Try to get video name from filename (remove .part extension)
+                video_name = part_file.stem
+                
+                # Check if corresponding .ytdl file exists for metadata
+                ytdl_file = part_file.with_suffix('.part.ytdl')
+                if not ytdl_file.exists():
+                    ytdl_file = part_file.parent / f"{video_name}.ytdl"
+                
+                self.partial_downloads.append({
+                    'part_file': str(part_file),
+                    'video_name': video_name,
+                    'size': size_str,
+                    'size_bytes': size_bytes,
+                    'ytdl_file': str(ytdl_file) if ytdl_file.exists() else None
+                })
+                
+                # Display in listbox
+                display_text = f"{video_name} ({size_str})"
+                self.resume_listbox.insert(tk.END, display_text)
+            
+            # Always show resume section with results
+            if self.partial_downloads:
+                self.resume_section.pack(fill=tk.X, padx=20, pady=(10, 20))
+                self.status_var.set(f"Found {len(self.partial_downloads)} partial download(s)")
+            else:
+                self.resume_listbox.insert(0, f"Found {found_count} .part file(s), but all are fragments. No resumable downloads.")
+                self.resume_section.pack(fill=tk.X, padx=20, pady=(10, 20))
+                self.status_var.set("No resumable downloads found")
+                
+        except Exception as e:
+            error_msg = f"Error checking for partial downloads: {str(e)}"
+            self.resume_listbox.insert(0, error_msg)
+            self.resume_section.pack(fill=tk.X, padx=20, pady=(10, 20))
+            self.status_var.set(f"Error: {str(e)}")
+            print(f"Error in check_partial_downloads: {e}")
+            import traceback
+            traceback.print_exc()
+    
+    def on_resume_select(self, event):
+        """Handle resume selection"""
+        selection = self.resume_listbox.curselection()
+        if not selection:
+            self.selected_partial = None
+            self.resume_btn.config(state=tk.DISABLED)
+            return
+        
+        idx = selection[0]
+        if idx < len(self.partial_downloads):
+            self.selected_partial = self.partial_downloads[idx]
+            self.resume_btn.config(state=tk.NORMAL)
+    
+    def resume_download(self):
+        """Resume a partial download"""
+        if not self.selected_partial or self.is_downloading:
+            return
+        
+        part_file = Path(self.selected_partial['part_file'])
+        
+        # Try to extract URL from .ytdl file if it exists
+        url = None
+        if self.selected_partial['ytdl_file']:
+            try:
+                with open(self.selected_partial['ytdl_file'], 'r') as f:
+                    import json
+                    metadata = json.load(f)
+                    url = metadata.get('url') or metadata.get('webpage_url')
+            except:
+                pass
+        
+        # If no URL found, prompt user
+        if not url:
+            url = simpledialog.askstring(
+                "Resume Download",
+                f"Enter the YouTube URL for:\n{self.selected_partial['video_name']}\n\n"
+                "This is needed to resume the download."
+            )
+            if not url:
+                return
+        
+        # Set the URL and start download
+        self.url_var.set(url)
+        
+        # Disable buttons
+        self.resume_btn.config(state=tk.DISABLED)
+        self.is_downloading = True
+        
+        # Show progress
+        self.progress_section.pack(fill=tk.X)
+        self.progress_var.set(0)
+        self.status_var.set("Resuming download...")
+        
+        # Start resume download in separate thread
+        thread = threading.Thread(target=self._resume_download_thread, args=(url, str(part_file)))
+        thread.daemon = False
+        thread.start()
+    
+    def _resume_download_thread(self, url, part_file_path):
+        """Thread function to resume download"""
+        try:
+            output_path = self.output_var.get()
+            part_file = Path(part_file_path)
+            
+            # yt-dlp will automatically resume if .part file exists
+            # We need to determine the format from the existing file or use best
+            ydl_opts = {
+                'format': 'bestvideo+bestaudio/best',
+                'outtmpl': str(part_file.with_suffix('')),  # Remove .part extension
+                'merge_output_format': 'mp4',
+                'progress_hooks': [self._progress_hook],
+                'continuedl': True,  # Resume partial downloads
+                'noplaylist': True,
+                'keepvideo': False,
+                'nocheckcertificate': True,
+                'no_check_certificate': True,
+                'ignoreerrors': True,
+                'retries': 10,
+                'fragment_retries': 10,
+                'file_access_retries': 3,
+            }
+            
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                ydl.download([url])
+            
+            # Remove .part extension if download completed
+            final_file = part_file.with_suffix('')
+            if final_file.exists() and part_file.exists():
+                # File was completed and renamed
+                pass
+            
+            # Update UI on completion
+            self.root.after(0, self._download_complete)
+            
+        except Exception as e:
+            self.root.after(0, lambda: self._download_error(str(e)))
             
     def start_download(self):
         """Start the download process"""
@@ -605,9 +887,9 @@ class YouTubeDownloaderGUI:
         self.progress_var.set(0)
         self.status_var.set("Starting download...")
         
-        # Start download in separate thread
+        # Start download in separate thread (non-daemon so it can finish merge)
         thread = threading.Thread(target=self._download_thread)
-        thread.daemon = True
+        thread.daemon = False  # Allow thread to complete merge even if GUI stays alive
         thread.start()
         
     def _download_thread(self):
@@ -620,18 +902,42 @@ class YouTubeDownloaderGUI:
             # Create output directory if it doesn't exist
             os.makedirs(output_path, exist_ok=True)
             
-            ydl_opts = {
-                'format': f'{format_id}+bestaudio/best',
-                'outtmpl': os.path.join(output_path, '%(title)s.%(ext)s'),
-                'merge_output_format': 'mp4',
-                'progress_hooks': [self._progress_hook],
-                'continuedl': True,
-                'noplaylist': True,
-                'keepvideo': False,
-                'nocheckcertificate': True,
-                'no_check_certificate': True,  # Alternative format
-                'ignoreerrors': True
-            }
+            # Check if audio download is requested
+            if format_id == 'audio_mp3':
+                ydl_opts = {
+                    'format': 'bestaudio/best',
+                    'outtmpl': os.path.join(output_path, '%(title)s.%(ext)s'),
+                    'postprocessors': [{
+                        'key': 'FFmpegExtractAudio',
+                        'preferredcodec': 'mp3',
+                        'preferredquality': '192',
+                    }],
+                    'progress_hooks': [self._progress_hook],
+                    'continuedl': True,
+                    'noplaylist': True,
+                    'nocheckcertificate': True,
+                    'no_check_certificate': True,
+                    'ignoreerrors': True,
+                    'retries': 10,
+                    'fragment_retries': 10,
+                    'file_access_retries': 3,
+                }
+            else:
+                ydl_opts = {
+                    'format': f'{format_id}+bestaudio/best',
+                    'outtmpl': os.path.join(output_path, '%(title)s.%(ext)s'),
+                    'merge_output_format': 'mp4',
+                    'progress_hooks': [self._progress_hook],
+                    'continuedl': True,  # Resume partial downloads
+                    'noplaylist': True,
+                    'keepvideo': False,
+                    'nocheckcertificate': True,
+                    'no_check_certificate': True,  # Alternative format
+                    'ignoreerrors': True,
+                    'retries': 10,  # Retry on failures
+                    'fragment_retries': 10,  # Retry fragment downloads
+                    'file_access_retries': 3,  # Retry file access errors
+                }
             
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 ydl.download([url])
@@ -640,7 +946,10 @@ class YouTubeDownloaderGUI:
             self.root.after(0, self._download_complete)
             
         except Exception as e:
-            self.root.after(0, lambda: self._download_error(str(e)))
+            error_msg = str(e)
+            if format_id == 'audio_mp3' and ('ffmpeg' in error_msg.lower() or 'FFmpeg' in error_msg):
+                error_msg = f"{error_msg}\n\nNote: MP3 conversion requires FFmpeg to be installed.\nPlease install FFmpeg and try again."
+            self.root.after(0, lambda: self._download_error(error_msg))
             
     def _progress_hook(self, d):
         """Progress hook for download"""
@@ -650,8 +959,11 @@ class YouTubeDownloaderGUI:
                 total = d.get('total_bytes') or d.get('total_bytes_estimate', 0)
                 
                 if total > 0:
-                    percent = (downloaded / total) * 100
-                    self.root.after(0, lambda: self.progress_var.set(percent))
+                    percent = min((downloaded / total) * 100, 98.0)  # Cap at 98% until merge
+                    # Fix lambda variable capture by storing in local variable
+                    def update_progress(p=percent):
+                        self.progress_var.set(p)
+                    self.root.after(0, update_progress)
                 
                 speed = d.get('speed', 0)
                 eta = d.get('eta', 0)
@@ -669,19 +981,25 @@ class YouTubeDownloaderGUI:
                     eta_str = "Calculating..."
                 
                 details = f"Speed: {speed_str} • ETA: {eta_str}"
-                self.root.after(0, lambda: self.status_var.set(f"Downloading... {details}"))
+                def update_status(s=f"Downloading... {details}"):
+                    self.status_var.set(s)
+                self.root.after(0, update_status)
                 
-            except Exception:
+            except Exception as e:
+                print(f"Progress hook error: {e}")
                 pass
                 
         elif d['status'] == 'finished':
-            self.root.after(0, lambda: self.status_var.set("Download complete! Processing..."))
-            self.root.after(0, lambda: self.progress_var.set(100))
+            def update_finished():
+                self.status_var.set("Merging video and audio... (This may take a moment)")
+                self.progress_var.set(99)  # Set to 99% during merge phase
+            self.root.after(0, update_finished)
             
     def _download_complete(self):
         """Handle download completion"""
         self.is_downloading = False
         self.download_btn.config(state=tk.NORMAL)
+        self.progress_var.set(100)  # Ensure progress shows 100%
         self.status_var.set("✓ Download completed successfully!")
         
         messagebox.showinfo(

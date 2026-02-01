@@ -173,30 +173,54 @@ class YouTubeDownloaderApp {
             qualityOption.className = 'quality-option';
             qualityOption.dataset.formatId = format.format_id;
             
-            qualityOption.innerHTML = `
-                <div class="quality-header">
-                    <span class="quality-resolution">${format.resolution}</span>
-                    <span class="quality-label">${format.quality}</span>
-                </div>
-                <div class="quality-details">
-                    <div class="quality-detail">
-                        <i class="fas fa-video"></i>
-                        <span>${format.fps} FPS</span>
+            // Special handling for MP3 option
+            if (format.format_id === 'audio_mp3') {
+                qualityOption.innerHTML = `
+                    <div class="quality-header">
+                        <span class="quality-resolution">🎵 ${format.resolution}</span>
+                        <span class="quality-label">${format.quality}</span>
                     </div>
-                    <div class="quality-detail">
-                        <i class="fas fa-volume-up"></i>
-                        <span>Audio: ${format.has_audio ? 'Yes' : 'No'}</span>
+                    <div class="quality-details">
+                        <div class="quality-detail">
+                            <i class="fas fa-music"></i>
+                            <span>Audio Only</span>
+                        </div>
+                        <div class="quality-detail">
+                            <i class="fas fa-file"></i>
+                            <span>${format.ext.toUpperCase()}</span>
+                        </div>
+                        <div class="quality-detail">
+                            <i class="fas fa-compress"></i>
+                            <span>Smaller File Size</span>
+                        </div>
                     </div>
-                    <div class="quality-detail">
-                        <i class="fas fa-file"></i>
-                        <span>${format.ext.toUpperCase()}</span>
+                `;
+            } else {
+                qualityOption.innerHTML = `
+                    <div class="quality-header">
+                        <span class="quality-resolution">${format.resolution}</span>
+                        <span class="quality-label">${format.quality}</span>
                     </div>
-                    <div class="quality-detail">
-                        <i class="fas fa-weight"></i>
-                        <span>~${format.size}</span>
+                    <div class="quality-details">
+                        <div class="quality-detail">
+                            <i class="fas fa-video"></i>
+                            <span>${format.fps} FPS</span>
+                        </div>
+                        <div class="quality-detail">
+                            <i class="fas fa-volume-up"></i>
+                            <span>Audio: ${format.has_audio ? 'Yes' : 'No'}</span>
+                        </div>
+                        <div class="quality-detail">
+                            <i class="fas fa-file"></i>
+                            <span>${format.ext.toUpperCase()}</span>
+                        </div>
+                        <div class="quality-detail">
+                            <i class="fas fa-weight"></i>
+                            <span>~${format.size}</span>
+                        </div>
                     </div>
-                </div>
-            `;
+                `;
+            }
             
             qualityOption.addEventListener('click', () => {
                 this.selectQuality(qualityOption, format);
@@ -226,6 +250,7 @@ class YouTubeDownloaderApp {
     }
     
     async startDownload() {
+        // Require quality selection
         if (!this.selectedQuality) {
             this.showToast('Please select a quality first', 'error');
             return;
@@ -255,7 +280,8 @@ class YouTubeDownloaderApp {
                 this.downloadId = result.download_id;
                 this.isDownloading = true;
                 this.showProgressSection();
-                this.showToast('Download started!', 'success');
+                const typeLabel = this.selectedQuality.format_id === 'audio_mp3' ? 'MP3' : 'Video';
+                this.showToast(`${typeLabel} download started!`, 'success');
             } else {
                 this.showToast(`Download failed: ${result.error}`, 'error');
             }
