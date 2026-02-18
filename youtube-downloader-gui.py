@@ -74,6 +74,9 @@ class YouTubeDownloaderGUI:
         self.resolution_formats = None
         self.selected_format = None
         self.is_downloading = False
+        self.available_audio_formats = []
+        self.audio_format_options = []
+        self.selected_audio_download_opts = None
         self.partial_downloads = []  # Store detected partial downloads
         self.selected_partial = None  # Selected partial download to resume
         
@@ -564,9 +567,45 @@ class YouTubeDownloaderGUI:
                             'has_audio': acodec != 'none',
                         })
             
+            # Parse audio-only formats and detect available native codecs
+            audio_codecs = {}
+            for fmt in info.get('formats', []):
+                if fmt.get('vcodec') == 'none' and fmt.get('acodec') not in ('none', None, ''):
+                    acodec = fmt.get('acodec', '') or ''
+                    abr = fmt.get('abr') or 0
+                    filesize = fmt.get('filesize') or fmt.get('filesize_approx') or 0
+                    format_id = fmt.get('format_id', '')
+                    ext = fmt.get('ext', '')
+
+                    if acodec.startswith('mp4a') or acodec == 'aac':
+                        codec_key, codec_display, container = 'aac', 'AAC', 'm4a'
+                    elif acodec == 'opus':
+                        codec_key, codec_display, container = 'opus', 'Opus', 'webm'
+                    elif acodec == 'vorbis':
+                        codec_key, codec_display, container = 'vorbis', 'Vorbis', 'webm'
+                    else:
+                        codec_key = acodec.lower().replace('.', '_')
+                        codec_display = acodec.upper()
+                        container = ext
+
+                    if codec_key not in audio_codecs or abr > audio_codecs[codec_key].get('abr', 0):
+                        audio_codecs[codec_key] = {
+                            'format_id': format_id,
+                            'codec_key': codec_key,
+                            'codec_display': codec_display,
+                            'container': container,
+                            'abr': abr,
+                            'filesize': filesize,
+                        }
+
+            available_audio = list(audio_codecs.values())
+            codec_order = {'opus': 0, 'aac': 1}
+            available_audio.sort(key=lambda x: codec_order.get(x['codec_key'], 99))
+
             self.video_info = info
             self.resolution_formats = resolution_formats
-            
+            self.available_audio_formats = available_audio
+
             # Update UI in main thread
             self.root.after(0, self._update_video_info_ui)
             
@@ -598,10 +637,38 @@ class YouTubeDownloaderGUI:
         
         # Populate quality listbox
         self.quality_listbox.delete(0, tk.END)
-        
-        # Add MP3 option at the beginning
-        self.quality_listbox.insert(tk.END, "🎵 Audio Only (MP3)")
-        
+        self.audio_format_options = []
+
+        # Native audio formats (only those actually present in this video)
+        for af in self.available_audio_formats:
+            abr_str = f" · {int(af['abr'])}kbps" if af['abr'] else ""
+            display = f"🎵 {af['codec_display']} — native, no re-encode{abr_str}"
+            self.audio_format_options.append({
+                'display': display,
+                'native': True,
+                'format_id': af['format_id'],
+                'codec': af['codec_key'],
+                'container': af['container'],
+            })
+            self.quality_listbox.insert(tk.END, display)
+
+        # Transcoded formats — always available if any audio stream exists (requires FFmpeg)
+        if self.available_audio_formats:
+            for codec, label, note in [
+                ('mp3',  'MP3',  '192kbps · requires FFmpeg'),
+                ('flac', 'FLAC', 'lossless · requires FFmpeg'),
+                ('wav',  'WAV',  'lossless PCM · requires FFmpeg'),
+            ]:
+                display = f"🎵 {label} — {note}"
+                self.audio_format_options.append({
+                    'display': display,
+                    'native': False,
+                    'format_id': None,
+                    'codec': codec,
+                    'container': codec,
+                })
+                self.quality_listbox.insert(tk.END, display)
+
         # Sort resolutions by height
         sorted_resolutions = sorted(
             self.resolution_formats.items(),
@@ -653,29 +720,34 @@ class YouTubeDownloaderGUI:
             return
         
         idx = selection[0]
-        
-        # Check if MP3 option is selected (index 0)
-        if idx == 0:
-            self.selected_format = 'audio_mp3'
+        num_audio = len(self.audio_format_options)
+
+        # Audio option selected
+        if idx < num_audio:
+            audio_opt = self.audio_format_options[idx]
+            self.selected_format = 'audio'
+            self.selected_audio_download_opts = audio_opt
             self.download_btn.config(state=tk.NORMAL)
-            self.status_var.set("Ready to download as MP3")
+            label = audio_opt['display'].replace('🎵 ', '')
+            self.status_var.set(f"Ready to download: {label}")
             return
-        
-        # Adjust index for video resolutions (subtract 1 for MP3 option)
+
+        # Video resolution selected
+        video_idx = idx - num_audio
         sorted_resolutions = sorted(
             self.resolution_formats.items(),
             key=lambda x: int(x[0].split('x')[1]),
             reverse=True
         )
-        
-        resolution, formats = sorted_resolutions[idx - 1]
+
+        resolution, formats = sorted_resolutions[video_idx]
         best_format = max(formats, key=lambda x: (x['has_audio'], x['fps']))
-        
+
         self.selected_format = best_format['format_id']
-        
+
         # Enable download button
         self.download_btn.config(state=tk.NORMAL)
-        
+
         self.status_var.set(f"Ready to download at {resolution}")
         
     def browse_location(self):
@@ -906,25 +978,43 @@ class YouTubeDownloaderGUI:
             os.makedirs(output_path, exist_ok=True)
             
             # Check if audio download is requested
-            if format_id == 'audio_mp3':
-                ydl_opts = {
-                    'format': 'bestaudio/best',
-                    'outtmpl': os.path.join(output_path, '%(title)s.%(ext)s'),
-                    'postprocessors': [{
-                        'key': 'FFmpegExtractAudio',
-                        'preferredcodec': 'mp3',
-                        'preferredquality': '192',
-                    }],
-                    'progress_hooks': [self._progress_hook],
-                    'continuedl': True,
-                    'noplaylist': True,
-                    'nocheckcertificate': True,
-                    'no_check_certificate': True,
-                    'ignoreerrors': True,
-                    'retries': 10,
-                    'fragment_retries': 10,
-                    'file_access_retries': 3,
-                }
+            if format_id == 'audio':
+                audio_opt = self.selected_audio_download_opts
+                if audio_opt.get('native'):
+                    ydl_opts = {
+                        'format': audio_opt['format_id'],
+                        'outtmpl': os.path.join(output_path, '%(title)s.%(ext)s'),
+                        'progress_hooks': [self._progress_hook],
+                        'continuedl': True,
+                        'noplaylist': True,
+                        'nocheckcertificate': True,
+                        'no_check_certificate': True,
+                        'ignoreerrors': True,
+                        'retries': 10,
+                        'fragment_retries': 10,
+                        'file_access_retries': 3,
+                    }
+                else:
+                    codec = audio_opt['codec']
+                    quality = '0' if codec in ('flac', 'wav') else '192'
+                    ydl_opts = {
+                        'format': 'bestaudio/best',
+                        'outtmpl': os.path.join(output_path, '%(title)s.%(ext)s'),
+                        'postprocessors': [{
+                            'key': 'FFmpegExtractAudio',
+                            'preferredcodec': codec,
+                            'preferredquality': quality,
+                        }],
+                        'progress_hooks': [self._progress_hook],
+                        'continuedl': True,
+                        'noplaylist': True,
+                        'nocheckcertificate': True,
+                        'no_check_certificate': True,
+                        'ignoreerrors': True,
+                        'retries': 10,
+                        'fragment_retries': 10,
+                        'file_access_retries': 3,
+                    }
             else:
                 ydl_opts = {
                     'format': f'{format_id}+bestaudio/best',
@@ -950,8 +1040,11 @@ class YouTubeDownloaderGUI:
             
         except Exception as e:
             error_msg = str(e)
-            if format_id == 'audio_mp3' and ('ffmpeg' in error_msg.lower() or 'FFmpeg' in error_msg):
-                error_msg = f"{error_msg}\n\nNote: MP3 conversion requires FFmpeg to be installed.\nPlease install FFmpeg and try again."
+            if format_id == 'audio' and ('ffmpeg' in error_msg.lower() or 'FFmpeg' in error_msg):
+                audio_opt = self.selected_audio_download_opts or {}
+                if not audio_opt.get('native'):
+                    codec = audio_opt.get('codec', 'audio').upper()
+                    error_msg = f"{error_msg}\n\nNote: {codec} conversion requires FFmpeg to be installed.\nPlease install FFmpeg and try again."
             self.root.after(0, lambda: self._download_error(error_msg))
             
     def _progress_hook(self, d):
